@@ -2,7 +2,7 @@
 title: "Exploartion of steam reviews"
 author: "Stephan"
 date: "`r format(Sys.Date(), '%b %d, %Y')`"
-output: github_document
+output: html_document
 ---
 
 ```{r setup, include=FALSE}

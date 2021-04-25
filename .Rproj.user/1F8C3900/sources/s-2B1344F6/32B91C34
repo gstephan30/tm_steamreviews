@@ -3,7 +3,7 @@
     "path": "~/tm_steamreviews/index.Rmd",
     "project_path": "index.Rmd",
     "type": "r_markdown",
-    "hash": "3606257717",
+    "hash": "2824564436",
     "contents": "",
     "dirty": false,
     "created": 1619379530867.0,
@@ -11,15 +11,15 @@
     "relative_order": 3,
     "properties": {
         "tempName": "Untitled3",
-        "cursorPosition": "51,0",
-        "scrollLine": "40"
+        "cursorPosition": "4,12",
+        "scrollLine": "0"
     },
     "folds": "",
-    "lastKnownWriteTime": 1619379901,
+    "lastKnownWriteTime": 1619380238,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1619379901539,
+    "last_content_update": 1619380238699,
     "read_only": false,
     "read_only_alternatives": []
 }
