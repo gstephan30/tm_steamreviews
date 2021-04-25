@@ -1,0 +1,116 @@
+library(jsonlite)
+library(tidyverse)
+library(lubridate)
+theme_set(theme_light())
+theme_
+json_raw <- fromJSON("data/review_280720.json", simplifyVector = FALSE)
+
+data_raw <- tibble(
+  key = names(json_raw),
+  json = json_raw
+) %>% 
+  filter(key == "reviews") %>% 
+  unnest(json) %>% 
+  unnest_wider(json) %>%
+  select(language, review, timestamp_created, votes_up, steam_purchase, received_for_free) %>% 
+  mutate(free_or_purchased = ifelse(steam_purchase == TRUE | received_for_free == TRUE, TRUE, FALSE)) %>% 
+  select(-steam_purchase, -received_for_free)
+
+library(tidytext)
+library(spacyr)
+# python -m spacy download en
+spacy_initialize(model = "en_core_web_sm")  
+
+lemma <- data_raw %>% 
+  filter(language == "english") %>%  
+  rownames_to_column("doc_id") %>% 
+  rename(text = review) %>%
+  spacy_parse() %>% 
+  as_tibble() %>% 
+  anti_join(get_stopwords(), by = c("lemma" = "word")) %>%
+  filter(pos != "PUNCT",
+         pos != "SYM",
+         lemma != " ",
+         !grepl("[[:punct:] ]+", lemma),
+         !grepl("\\\n", lemma)) 
+
+lemma %>% 
+  count(lemma, pos)
+
+senti <- lemma %>% 
+  left_join(get_sentiments("afinn"), by = c("lemma" = "word")) %>% 
+  filter(!is.na(value)) %>% 
+  group_by(doc_id) %>% 
+  summarise(sent = sum(value))
+
+sent_proc <- data_raw %>% 
+  filter(language == "english") %>%  
+  rownames_to_column("doc_id") %>% 
+  select(doc_id, timestamp_created) %>% 
+  mutate(timestamp_created = as.POSIXct(timestamp_created, origin = "1970-01-01")) %>% 
+  left_join(
+    senti
+  ) %>% 
+  mutate(tag = as_date(timestamp_created), 
+         monat = floor_date(tag, unit = "month")) %>% 
+  group_by(monat) %>% 
+  summarise(sent_total = sum(sent, na.rm = TRUE),
+            n_total = n()) 
+
+sent_proc %>% 
+  mutate(sent_median = median(sent_total)) %>% 
+  mutate(trend = ifelse(sent_total >= sent_median, "higher", "lower"), 
+         jahr = year(monat)) %>% 
+  ggplot(aes(x = monat)) +
+  geom_col(aes(y = sent_total, fill = trend)) +
+  geom_line(aes(y = n_total)) +
+  geom_hline(aes(yintercept = sent_median), linetype = "dashed") +
+  facet_wrap(~jahr, scales = "free_x", nrow = 2) + 
+  ggsci::scale_fill_lancet() +
+  labs(fill = "Trend compared to median",
+       title = "Review Sentiment compared to total median Sentiment",
+       subtitle = "Sentiment: afinn; gameid: 280720") +
+  theme(legend.position = "bottom",
+        strip.background = element_rect(fill= "#00468BFF"),
+        strip.text = element_text(colour = "white", face = "bold"))
+
+library(widyr)
+cor_df <- data_raw %>% 
+  filter(language == "english") %>% 
+  rownames_to_column("id") %>% 
+  unnest_tokens(word, review) %>% 
+  filter(!word %in% stopwords::stopwords(), 
+         !grepl("[[:punct:] ]+", word),
+         !grepl("[0-9]+", word),
+         !grepl("http", word)) %>% 
+  mutate(word = case_when(word == "games" ~ "game",
+                          TRUE ~ word)) %>% 
+  add_count(word) %>% 
+  filter(n > 15) %>% 
+  pairwise_cor(word, id, upper = FALSE) %>% 
+  filter(correlation >= 0.32 |
+           correlation <= -0.32)
+
+ind_vertices <- tibble(
+  words = c(cor_df$item1, cor_df$item2)
+) %>% 
+  distinct()
+
+vertices <- data_raw %>% 
+  count(word_stem) %>% 
+  filter(word_stem %in% ind_vertices$words) %>% 
+  as.data.frame()
+
+
+library(igraph) 
+library(ggraph)
+cor_df %>% 
+  
+  graph_from_data_frame() %>% 
+  ggraph("fr") +
+  geom_edge_link(aes(color = correlation), edge_width = 1.2) +
+  scale_edge_color_gradient2(low = "#72bcd4", high = "red", midpoint = 0.6) +
+  geom_node_point(size = 3.5, color = "black") +
+  geom_node_point(aes(color = n), size = 3) +
+  scale_color_viridis_c() 
+  

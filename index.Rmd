@@ -1,0 +1,180 @@
+---
+title: "Exploartion of steam reviews"
+author: "Stephan"
+date: "`r format(Sys.Date(), '%b %d, %Y')`"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, dpi = 96)
+
+library(jsonlite)
+library(tidyverse)
+library(lubridate)
+library(showtext)
+font_add_google("Schoolbell", "bell")
+showtext_auto()
+theme_set(theme_light())
+json_raw <- fromJSON("data/review_280720.json", simplifyVector = FALSE)
+
+data_raw <- tibble(
+  key = names(json_raw),
+  json = json_raw
+) %>% 
+  filter(key == "reviews") %>% 
+  unnest(json) %>% 
+  unnest_wider(json) %>%
+  select(language, review, timestamp_created, votes_up, steam_purchase, received_for_free) %>% 
+  mutate(free_or_purchased = ifelse(steam_purchase == TRUE | received_for_free == TRUE, TRUE, FALSE)) %>% 
+  select(-steam_purchase, -received_for_free)
+```
+
+### Spacy Example (Lemma)
+
+```{r}
+library(tidytext)
+library(spacyr)
+# python -m spacy download en
+spacy_initialize(model = "en_core_web_sm")  
+
+lemma <- data_raw %>% 
+  filter(language == "english") %>%  
+  rownames_to_column("doc_id") %>% 
+  rename(text = review) %>%
+  spacy_parse() %>% 
+  as_tibble() %>% 
+  anti_join(get_stopwords(), by = c("lemma" = "word")) %>%
+  filter(pos != "PUNCT",
+         pos != "SYM",
+         lemma != " ",
+         !grepl("[[:punct:] ]+", lemma),
+         !grepl("\\\n", lemma)) 
+
+senti <- lemma %>% 
+  left_join(get_sentiments("afinn"), by = c("lemma" = "word")) %>% 
+  filter(!is.na(value)) %>% 
+  group_by(doc_id) %>% 
+  summarise(sent = sum(value))
+
+sent_proc <- data_raw %>% 
+  filter(language == "english") %>%  
+  rownames_to_column("doc_id") %>% 
+  select(doc_id, timestamp_created) %>% 
+  mutate(timestamp_created = as.POSIXct(timestamp_created, origin = "1970-01-01")) %>% 
+  left_join(
+    senti
+  ) %>% 
+  mutate(tag = as_date(timestamp_created), 
+         monat = floor_date(tag, unit = "month")) %>% 
+  group_by(monat) %>% 
+  summarise(sent_total = sum(sent, na.rm = TRUE),
+            n_total = n()) 
+
+sent_proc %>% 
+  mutate(sent_median = median(sent_total)) %>% 
+  mutate(trend = ifelse(sent_total >= sent_median, "higher", "lower"), 
+         jahr = year(monat)) %>% 
+  ggplot(aes(x = monat)) +
+  geom_col(aes(y = sent_total, fill = trend)) +
+  geom_line(aes(y = n_total)) +
+  geom_hline(aes(yintercept = sent_median), linetype = "dashed") +
+  facet_wrap(~jahr, scales = "free_x", nrow = 2) + 
+  ggsci::scale_fill_lancet() +
+  labs(fill = "Trend compared to median",
+       title = "Review Sentiment compared to total median Sentiment",
+       subtitle = "Sentiment: afinn; gameid: 280720") +
+  theme(legend.position = "bottom",
+        strip.background = element_rect(fill= "#00468BFF"),
+        strip.text = element_text(colour = "white", face = "bold"))
+```
+
+### Snowball Example (Pairwise correlation of Word Stems)
+
+```{r}
+library(tidytext)
+library(rvest)
+library(SnowballC)
+typos <- read_html("https://en.wikipedia.org/wiki/Wikipedia:Lists_of_common_misspellings/For_machines") %>% 
+  html_node(xpath = "/html/body/div[3]/div[3]/div[5]/div[1]/pre") %>% 
+  html_text(trim = TRUE) %>% 
+  as_tibble() %>% 
+  separate_rows(value, sep = "[\r\n]") %>% 
+  separate(value, c("wrong", "correct"), sep = "\\-\\>")
+
+stemmed_tokens <- data_raw %>% 
+  filter(language == "english") %>% 
+  rownames_to_column("id") %>% 
+  unnest_tokens(word, review) %>% 
+  filter(!word %in% stop_words$word) %>% 
+  left_join(
+    typos,
+    by = c("word" = "wrong")
+  ) %>% 
+  mutate(word = ifelse(!is.na(correct), correct, word)) %>% 
+  select(-correct) %>% 
+  mutate(word_stem = wordStem(word))
+
+library(widyr)
+library(ggplot2)
+
+
+pcor <- stemmed_tokens %>%
+  add_count(word_stem) %>% 
+  filter(n > 15) %>% 
+  filter(word_stem != "hmm",
+         !grepl("[0-9]", word_stem)) %>% 
+  pairwise_cor(word_stem, id, upper = FALSE) %>% 
+  filter(correlation >= 0.32 |
+           correlation <= -0.32)
+
+ind_vertices <- tibble(
+  words = c(pcor$item1, pcor$item2)
+) %>% 
+  distinct()
+
+
+## hypothesis
+## votes per review and its associated stem
+## average stem
+vertices <- stemmed_tokens %>% 
+  select(id, word_stem, votes_up) %>% 
+  distinct() %>% 
+  group_by(word_stem) %>% 
+  summarise(avg_stem = mean(votes_up)) %>% 
+  filter(word_stem %in% ind_vertices$words) %>% 
+  as.data.frame()
+
+
+
+
+library(ggraph)
+library(igraph)
+
+#library(ggnewscale)
+set.seed(2021)
+heute <- Sys.Date()
+pcor %>% 
+  graph_from_data_frame(vertices = vertices) %>% 
+  ggraph("fr") +
+  
+  geom_edge_link(aes(color = correlation), edge_width = 1.2) +
+  scale_edge_color_gradient2(low = "#72bcd4", high = "red", midpoint = 0.6) +
+  #new_scale_color() +
+  
+  geom_node_point(size = 3.5, color = "black") +
+  geom_node_point(aes(color = avg_stem), size = 3) +
+  scale_color_viridis_c() +
+  geom_node_text(aes(label = name), repel = TRUE, size = 6, family = "bell") +
+  theme_void(base_family = "bell") +
+  labs(title = 'Correlation of words most appeared in steam review for game: 280720',
+       subtitle = paste0("Words are corrected and stemmed, date: ", format(heute, "%b %d, %Y"), "\n",
+                         "Words filterd with p (rho) > 0.32"),
+       color = "Average votes\nthe stem received",
+       edge_color = "Word pair\ncorrelation"
+  ) +
+  theme(legend.position = "bottom",
+        plot.subtitle = element_text(lineheight = 0.5)) +
+  guides(color = guide_colorbar(title.position = "top"),
+         edge_color = guide_edge_colorbar(title.position = "top"))
+```
+
