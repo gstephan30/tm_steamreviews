@@ -14,7 +14,7 @@ library(lubridate)
 library(showtext)
 font_add_google("Schoolbell", "bell")
 showtext_auto()
-theme_set(theme_light())
+theme_set(theme_light(base_size = 24, base_family = "bell"))
 json_raw <- fromJSON("data/review_280720.json", simplifyVector = FALSE)
 
 data_raw <- tibble(
@@ -31,7 +31,7 @@ data_raw <- tibble(
 
 ### Spacy Example (Lemma)
 
-```{r}
+```{r fig.height=6}
 library(tidytext)
 library(spacyr)
 # python -m spacy download en
@@ -81,11 +81,14 @@ sent_proc %>%
   facet_wrap(~jahr, scales = "free_x", nrow = 2) + 
   ggsci::scale_fill_lancet() +
   labs(fill = "Trend compared to median",
-       title = "Review Sentiment compared to total median Sentiment",
-       subtitle = "Sentiment: afinn; gameid: 280720") +
+       title = "Review Sentiment compared to total median Sentiment per month",
+       subtitle = "Black line is the total count of reviews\nSentiment: afinn; gameid: 280720", 
+       x = "Month",
+       y = "Sentiment total") +
   theme(legend.position = "bottom",
         strip.background = element_rect(fill= "#00468BFF"),
-        strip.text = element_text(colour = "white", face = "bold"))
+        strip.text = element_text(colour = "white", face = "bold"),
+        axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
 ### Snowball Example (Pairwise correlation of Word Stems)
@@ -164,8 +167,8 @@ pcor %>%
   geom_node_point(size = 3.5, color = "black") +
   geom_node_point(aes(color = avg_stem), size = 3) +
   scale_color_viridis_c() +
-  geom_node_text(aes(label = name), repel = TRUE, size = 6, family = "bell") +
-  theme_void(base_family = "bell") +
+  geom_node_text(aes(label = name), repel = TRUE, size = 10, family = "bell") +
+  theme_void(base_family = "bell", base_size = 24) +
   labs(title = 'Correlation of words most appeared in steam review for game: 280720',
        subtitle = paste0("Words are corrected and stemmed, date: ", format(heute, "%b %d, %Y"), "\n",
                          "Words filterd with p (rho) > 0.32"),
